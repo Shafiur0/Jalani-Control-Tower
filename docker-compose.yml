@@ -1,0 +1,103 @@
+services:
+  # ─── EXTERNAL (provided by organizers) ───
+  simulator-api:
+    image: asifmahmoud414/bup-fuel-supply-simulator:1.0.0
+    environment:
+      SIMULATION_SPEED: ${SIMULATION_SPEED:-8}
+      TICK_MINUTES: ${TICK_MINUTES:-15}
+      SIMULATOR_START_MODE: ${SIMULATOR_START_MODE:-paused}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
+  # ─── BACKEND API ───
+  backend-api:
+    build: ./backend-api
+    ports:
+      - "8080:8080"
+    environment:
+      SIMULATOR_URL: http://simulator-api:8000
+      DATABASE_PATH: /data/jalani.db
+      INTELLIGENCE_URL: http://intelligence-service:8081
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LLM_ENABLED: ${LLM_ENABLED:-false}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+    volumes:
+      - backend-data:/data
+    depends_on:
+      simulator-api:
+        condition: service_healthy
+      intelligence-service:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # ─── INTELLIGENCE SERVICE ───
+  intelligence-service:
+    build: ./intelligence-service
+    ports:
+      - "8081:8081"
+    environment:
+      LP_SOLVER: ${LP_SOLVER:-highs}
+      FORECAST_HORIZON_TICKS: ${FORECAST_HORIZON_TICKS:-24}
+      FORECAST_ALPHA: ${FORECAST_ALPHA:-0.3}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # ─── FRONTEND ───
+  frontend:
+    build: ./frontend
+    ports:
+      - "${FRONTEND_PORT:-4005}:80"
+    depends_on:
+      backend-api:
+        condition: service_started
+    restart: unless-stopped
+
+  # ─── OBSERVABILITY STACK ───
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/operations.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  backend-data:
+  prometheus-data:
+  grafana-data:

@@ -1,0 +1,10 @@
+{
+  "post_tool": [
+    {
+      "tools": ["replace_file_content", "multi_replace_file_content", "write_to_file"],
+      "command": "python -m py_compile {tool_args.TargetFile}",
+      "condition": "tool_args.TargetFile.endswith('.py')",
+      "description": "Run Python syntax check after editing files"
+    }
+  ]
+}
